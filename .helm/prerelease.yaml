@@ -1,0 +1,29 @@
+#vault:
+#  enabled: true
+#  url: "https://vault.domain.kz"
+#  image: vault-client:0.0.2
+#  secretName: vault-secret-name
+#  secretPath: secrets/production/ruby-app
+
+ingress:
+  enabled: true
+  nginxProxyService: "nginx-proxy-dev"
+  nginx.ingress.kubernetes.io/whitelist-source-range: #range of IPs
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  hosts:
+    - host: ruby-dev.domain.com
+      paths:
+        - /
+  tls:
+    - secretName: ruby-dev-tls
+      hosts:
+        - ruby-dev.domain.com
+
+resources:
+  limits:
+    cpu: 150m
+    memory: 256Mi
+  requests:
+    cpu: 70m
+    memory: 128Mi

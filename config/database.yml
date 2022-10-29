@@ -1,10 +1,12 @@
 default: &default
   adapter: postgresql
   encoding: unicode
-  host: database
-  username: postgres
-  password:
-  pool: 5
+  pool: <%= ENV['DB_POOL'] %>
+  username: <%= ENV['DB_USERNAME'] %>
+  password: <%= ENV['DB_PASSWORD'] %>
+  host: <%= ENV['DB_HOST'] %>
+  port: 5432
+  database: depot_test
 
 development:
   <<: *default

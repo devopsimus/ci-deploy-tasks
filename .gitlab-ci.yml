@@ -1,0 +1,126 @@
+image: $CI_DOCKER_REGISTRY/docker:19.03.11
+
+variables:
+  DEPLOY_IMAGE: helm-image:2.14.0
+  RELEASE_IMAGE: $CI_DOCKER_REGISTRY/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME:release_${CI_COMMIT_SHORT_SHA}
+  TESTING_IMAGE: $CI_DOCKER_REGISTRY/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME:${CI_COMMIT_REF_SLUG}_${CI_COMMIT_SHORT_SHA}
+  DOCKER_TLS_CERTDIR: "/certs"
+  LATEST_IMAGE: $CI_DOCKER_REGISTRY/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME:latest
+
+services:
+  - name: $CI_DOCKER_REGISTRY/docker:19.03.11-dind
+    alias: docker
+
+stages:
+  - build
+  - code_quality
+  - release
+  - deploy_stage
+  - deploy_prod
+
+.template-docker: &docker-auth
+  before_script:
+    - mkdir -p /root/.docker/ && echo ${$CI_DOCKER_REGISTRY_AUTH} | base64 -d > ~/.docker/config.json
+
+build:
+  <<: *docker-auth
+  stage: build
+  tags:
+    - tests
+  script:
+    - docker build -t ${TESTING_IMAGE} -f docker/Dockerfile .
+    - docker push ${TESTING_IMAGE}
+
+testing:
+  image: ${TESTING_IMAGE}
+  stage: code_quality
+  tags:
+    - tests
+  services:
+    - name: postgres:9.6
+      alias: postgres
+  variables:
+    POSTGRES_USER: depot_postgresql
+    POSTGRES_PASSWORD: depot_postgresql
+    DB_USERNAME: depot_postgresql
+    DB_PASSWORD: depot_postgresql
+    DB_HOST: postgres
+    RAILS_ENV: test
+    DISABLE_SPRING: 1
+    BUNDLE_PATH: vendor/bundle
+  script:
+    - gem install bundler -v 1.3.0
+    - bundle install
+    - bundle exec rails db:create db:schema:load --trace
+    - bundle exec rails db:migrate
+    - bundle exec rails test
+  allow_failure: true
+  dependencies:
+    - build
+
+vulnerabilities:
+  stage: code_quality
+  image: docker-registry.choco.kz/docker-images/trivy:0.7.0
+  tags:
+    - tests
+  script:
+    - mkdir -p ~/.docker && echo ${NEXUS_REGISTRY} | base64 -d > ~/.docker/config.json
+    - trivy image --no-progress --light --exit-code 0 --severity HIGH $TESTING_IMAGE
+    - trivy image --no-progress --light --exit-code 1 --severity CRITICAL $TESTING_IMAGE
+  allow_failure: true
+  dependencies:
+    - build
+
+release:
+  <<: *docker-auth
+  stage: release
+  tags:
+    - tests
+  script:
+    - docker build -t ${RELEASE_IMAGE} -f docker/Dockerfile .
+    - docker push ${RELEASE_IMAGE}
+    - docker tag ${RELEASE_IMAGE} ${LATEST_IMAGE}
+    - docker push ${LATEST_IMAGE}
+  only:
+    - branches
+  dependencies:
+    - testing
+
+stage_deploy:
+  image: ${DEPLOY_IMAGE}
+  stage: deploy_stage
+  only:
+    - master
+  tags:
+    - tests
+  environment:
+    name: staging
+  before_script:
+    - echo "deploy to kubernetes staging cluster"
+    - export RELEASE_NAME="${CI_PROJECT_NAME}"
+    - export CI_BUILD_REF_SLUG=prerelease
+    - echo ${KUBE_DEV_CONFIG} | base64 -d > /etc/deploy/config
+    - mv .helm/helm-deploy.sh . && chmod +x helm-deploy.sh
+  script:
+    - ./helm-deploy.sh -n ${RELEASE_NAME} -ns ${K8S_NAMESPACE_STAGING} -s image.name=${RELEASE_IMAGE}
+
+k8s-prod-deploy:
+  image: ${DEPLOY_IMAGE}
+  stage: deploy_prod
+  when: manual
+  tags:
+    - tests
+  only:
+    - master
+  environment:
+    name: production
+  before_script:
+    - echo "deploy to kubernetes production cluster"
+    - export RELEASE_NAME="${CI_PROJECT_NAME}-${CI_BUILD_REF_SLUG}"
+    - echo ${KUBE_PROD_CONFIG} | base64 -d > /etc/deploy/config
+    - mv .helm/helm-deploy.sh . && chmod +x helm-deploy.sh
+  script:
+    - ./helm-deploy.sh -n ${RELEASE_NAME} -ns ${K8S_NAMESPACE_PROD} -s image.name=${RELEASE_IMAGE}
+  dependencies:
+    - stage_deploy
+

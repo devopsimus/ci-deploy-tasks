@@ -1,0 +1,7 @@
+.git
+.gitlab-ci
+.DS_Store
+.gitignore
+.idea
+.env.*
+storage/*
