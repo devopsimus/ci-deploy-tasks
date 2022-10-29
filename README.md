@@ -3,6 +3,7 @@
 I used GitlabCI to complete the tasks and created a production ready CI/CD pipeline with Staging and Production clusters support
 
 .helm directory contains all of the helm templates and charts for staging and production clusters. Also, it contains helm-deploy.sh - a small bash script which checks the releases and deploys it to the clusters.
+I also added vault block, but commented it for now. If you want to add vars from the vault, you need to uncomment vault block in .helm/prerelease.yaml & .helm/master.yaml
 
 docker directory contains refactored Dockerfile
 
